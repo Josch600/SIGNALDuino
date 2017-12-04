@@ -58,27 +58,23 @@ void SignalDetectorClass::bufferMove(const uint8_t start)
 
 		reset();
 	}
-	else if (start == 0)
-	{
-	
-	}
 	else if (message.moveLeft(start))
 	{
 		m_truncated = true; 
 		//DBG_PRINT(__FUNCTION__); DBG_PRINT(" -> "); 	DBG_PRINT(start);  DBG_PRINT(" "); DBG_PRINT(messageLen);
 		//DBG_PRINT(" "); DBG_PRINT(message.bytecount);
 		//messageLen = messageLen - start;
-		messageLen = message.valcount;
 		if (messageLen > 0)
 			last = &pattern[message[messageLen - 1]]; //Eventuell wird last auf einen nicht mehr vorhandenen Wert gesetzt, da der Puffer komplett gelöscht wurde
 		else
 			last = NULL;
 	} else {
+		message.reset(); // Reset if move has failed
+
 		DBG_PRINT(__FUNCTION__); DBG_PRINT(" move error "); 	DBG_PRINT(start);
 		//printOut();
 	}
-
-
+	messageLen = message.valcount;
 
 }
 
@@ -188,10 +184,8 @@ inline void SignalDetectorClass::doDetect()
 			{
 				processMessage();
 				calcHisto();
-
-
 			}
-			for (uint8_t i = messageLen - 1; i >= 0 && histo[pattern_pos] > 0; --i)
+			for (int i = messageLen - 1; i >= 0 && histo[pattern_pos] > 0; --i)
 			{
 				if (message[i] == pattern_pos) // Finde den letzten Verweis im Array auf den Index der gleich ueberschrieben wird
 				{
@@ -328,19 +322,23 @@ void SignalDetectorClass::processMessage()
 	char buf[22] = {};
 	uint8_t n = 0;
 
-	if (mcDetected == true || messageLen >= minMessageLen) {
+
+	if (mcDetected == true || muDetected == true || messageLen >= minMessageLen) {
 		success = false;
 		m_overflow = (messageLen == maxMsgSize) ? true : false;
 
 #if DEBUGDETECT >= 1
 		DBG_PRINTLN("Message received:");
 #endif
-
-		compress_pattern();
-		calcHisto();
-		getClock();
-		if (state == clockfound) getSync();
-
+		if (!muDetected && !mcDetected)
+		{
+			compress_pattern();
+			getClock();
+			if (state == clockfound) getSync();
+		}
+		else {
+			calcHisto();
+		}
 #if DEBUGDETECT >= 1
 		printOut();
 #endif
@@ -546,7 +544,7 @@ void SignalDetectorClass::processMessage()
 			//preamble = "";
 			//postamble = "";
 
-			if (MCenabled)
+			if (MCenabled && !muDetected)
 			{
 				//DBG_PRINT(" mc: ");
 				//SDC_PRINT(" try mc ");
@@ -639,19 +637,22 @@ void SignalDetectorClass::processMessage()
 				}
 
 			}
-			if (MUenabled && state == clockfound && success == false && messageLen >= minMessageLen) {
+			if (muDetected || (MUenabled && state == clockfound && success == false && messageLen >= minMessageLen) ) {
 				//SDC_PRINT(" try mu");
 
 #if DEBUGDECODE > 1
 				DBG_PRINT(" MU found: ");
 #endif // DEBUGDECODE
-				SDC_WRITE(MSG_START);
+				
 				if (MredEnabled) {
 					int patternInt;
 					uint8_t patternLow;
 					uint8_t patternIdx;
-					
-					SDC_PRINT("Mu");  SDC_PRINT(SERIAL_DELIMITER);
+					if (!muDetected)
+					{
+						SDC_WRITE(MSG_START);
+						SDC_PRINT("Mu;");
+					}
 					for (uint8_t idx = 0; idx < patternLen; idx++)
 					{
 						if (pattern[idx] == 0 || histo[idx] == 0) continue;
@@ -665,10 +666,10 @@ void SignalDetectorClass::processMessage()
 						else {
 							patternIdx = idx | B10000000;    // Bit5 = 0 (Vorzeichen positiv)
 						}
-						
+
 						patternLow = lowByte(patternInt);
-						if (bitRead(patternLow,7) == 0) {
-							bitSet(patternLow,7);
+						if (bitRead(patternLow, 7) == 0) {
+							bitSet(patternLow, 7);
 						}
 						else {
 							bitSet(patternIdx, 4);   // wenn bei patternLow Bit7 gesetzt ist, dann bei patternIdx Bit4 = 1
@@ -687,27 +688,27 @@ void SignalDetectorClass::processMessage()
 					else {
 						SDC_PRINT("d");
 					}
-
-					for (uint8_t i = 0; i < messageLen; i=i+2) {					
-						message.getByte(i/2,&n);
+					
+					for (uint8_t i = 0; i < messageLen; i = i + 2) {
+						message.getByte(i / 2, &n);
 						SDC_WRITE(n);
 					}
 
-			
-				}
-				else {
-				
-					SDC_PRINT("MU");  SDC_PRINT(SERIAL_DELIMITER);
+
+				}	else {
+					if (!muDetected)
+					{
+						SDC_WRITE(MSG_START);
+						SDC_PRINT("MU;");
+					}
 
 					for (uint8_t idx = 0; idx < patternLen; idx++)
 					{
-						if (pattern[idx] == 0 || histo[idx] == 0) continue; 
-						//SDC_PRINT('P'); SDC_PRINT(idx); SDC_PRINT('='); SDC_PRINT(itoa(pattern[idx], buf, 10)); SDC_PRINT(SERIAL_DELIMITER);
-						n = sprintf(buf, "P%i=%i;", idx, pattern[idx]);
+						if (pattern[idx] == 0) continue;
+						n = sprintf(buf, ";P%i=%i", idx, pattern[idx]);
 						SDC_WRITE((const uint8_t *)buf, n);
-
 					}
-					SDC_PRINT("D=");
+					SDC_PRINT(";D=");
 					for (uint8_t i = 0; i < messageLen; ++i)
 					{
 						SDC_PRINT(itoa(message[i], buf, 10));
@@ -719,18 +720,32 @@ void SignalDetectorClass::processMessage()
 					SDC_PRINT("R=");  SDC_PRINT(rssiValue); SDC_PRINT(SERIAL_DELIMITER);     // Signal Level (RSSI)
 					*/
 				}
-				n = sprintf(buf, ";CP=%i;R=%i;", clock, rssiValue);
-				SDC_WRITE((const uint8_t *)buf, n);
-
 				if (m_overflow) {
-					SDC_PRINT("O");  SDC_PRINT(SERIAL_DELIMITER);
-				}
-				SDC_WRITE(MSG_END);  				
-				SDC_WRITE(char(0xA));
+					muDetected = true;
+					bufferMove(messageLen-1); // Todo: Initialisieren des Puffers anstelle eines moves etablieren.
+					success = true; // Extra flag to prevent reset and further buffermove
+				} else {
+					SDC_PRINT(SERIAL_DELIMITER);
 
-				
-				m_truncated = false;
-				success = true;
+					n = sprintf(buf, "CP=%i;R=%i;", clock, rssiValue);
+					SDC_WRITE((const uint8_t *)buf, n);
+
+					if (m_overflow || muDetected) {
+						if (muDetected) {
+							SDC_PRINT("o");
+						}
+						else {
+							SDC_PRINT("O");
+						}
+						SDC_PRINT(SERIAL_DELIMITER);
+					}
+						
+					SDC_WRITE(MSG_END);
+					SDC_WRITE(char(0xA));
+					m_truncated = false;
+					success = true;
+					muDetected = false;
+				}
 			}
 
 		}
@@ -805,6 +820,7 @@ void SignalDetectorClass::reset()
 	mend = 0;
 	//DBG_PRINT(":sdres:");
 	//last = NULL;
+	muDetected = false;
 }
 
 const status SignalDetectorClass::getState()

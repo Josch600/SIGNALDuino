@@ -115,6 +115,7 @@ public:
 	bool success;                         // True if a valid coding was found
 	bool m_truncated;					// Identify if message has been truncated
 	bool m_overflow;
+	bool muDetected ;
 	void bufferMove(const uint8_t start);
 
 	uint16_t tol;                           // calculated tolerance for signal

@@ -209,6 +209,12 @@ template<uint8_t bufSize>
 bool BitStore<bufSize>::moveLeft(const uint16_t begin)
 {
 	if (begin == 0 || begin >= valcount) return false;
+	
+	if (begin == valcount - 1)
+	{
+		reset();
+		return true;
+	}
 
 	uint8_t startbyte = begin*valuelen / 8;
 	byte crcval = this->getValue(begin);
@@ -291,9 +297,9 @@ bool BitStore<bufSize>::moveLeft(const uint16_t begin)
 	Serial.print("  datastore is (bin)");   Serial.print(datastore[bytecount], BIN);
 	Serial.print("  (dec)");   Serial.print(datastore[bytecount], DEC);
 	*/
-	if (crcval != this->getValue(0)) {
-		Serial.print("  ");  Serial.print(crcval, DEC); Serial.print(" <> ");  Serial.print(this->getValue(0), DEC);
-	}
+	//if (crcval != this->getValue(0)) {
+	//	Serial.print("  ");  Serial.print(crcval, DEC); Serial.print(" <> ");  Serial.print(this->getValue(0), DEC);
+	//}
 	/*
 	Serial.print(" bcnt: ");		 Serial.print(bcnt, DEC);
 	Serial.print(" valcount: ");     Serial.print(valcount, DEC);

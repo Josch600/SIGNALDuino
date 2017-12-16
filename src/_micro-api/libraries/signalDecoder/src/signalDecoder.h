@@ -60,7 +60,7 @@
 //#define DEBUGDETECT 255  // Very verbose output
 //#define DEBUGDECODE 1
 
-enum status { searching, clockfound, syncfound, detecting };
+enum status { searching, clockfound, syncfound, detecting, syncdetected };
 
 
 

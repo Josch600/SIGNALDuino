@@ -339,7 +339,7 @@ void SignalDetectorClass::processMessage()
 		printOut();
 #endif
 
-		if (state == syncfound && messageLen >= minMessageLen)// Messages mit clock / Sync Verhaeltnis pruefen
+		if (state == syncfound || state == syncdetected && messageLen >= minMessageLen)// Messages mit clock / Sync Verhaeltnis pruefen
 		{
 #if DEBUGDECODE >0
 			MSG_PRINT(" MS check: ");
@@ -349,18 +349,30 @@ void SignalDetectorClass::processMessage()
 
 			// Setup of some protocol identifiers, should be retrieved via fhem in future
 
-			mend = mstart + 2;   // GGf. kann man die Mindestlaenge von x Signalen vorspringen
 			bool m_endfound = false;
-
-			//uint8_t repeat;
-			while (mend < messageLen - 1)
+			if (state == syncdetected)
 			{
-				if (message[mend + 1] == sync && message[mend] == clock) {
-					mend -= 1;					// Previus signal is last from message
-					m_endfound = true;
-					break;
+				mend = mstart + minMessageLen;
+				while (mend < messageLen - 1)
+				{
+					if (message[mend + 1] == sync) {
+						mend -= 1;					// Previus signal is last from message
+						m_endfound = true;
+						break;
+					}
+					mend++;
 				}
-				mend += 2;
+			} else {
+				mend = mstart + 2;   // GGf. kann man die Mindestlaenge von x Signalen vorspringen
+				while (mend < messageLen - 1)
+				{
+					if (message[mend + 1] == sync && message[mend] == clock) {
+						mend -= 1;					// Previus signal is last from message
+						m_endfound = true;
+						break;
+					}
+					mend += 2;
+				}
 			}
 			if (mend > messageLen) mend = messageLen;  // Reduce mend if we are behind messageLen
 													   //if (!m_endfound) mend=messageLen;  // Reduce mend if we are behind messageLen
@@ -984,28 +996,41 @@ bool SignalDetectorClass::getSync()
 				// Pruefen ob der gefundene Sync auch als message [clock, p] vorkommt
 				uint8_t c = 0;
 				
-				while (c < min(syncLenMax,messageLen - minMessageLen))
+				while (c < min(syncLenMax, messageLen - minMessageLen))
 				{
-					if (message[c + 1] == p && message[c] == clock) {
-						sync = p;
-						state = syncfound;
-						mstart = c;
+					if (message[c + 1] == p) {
+						if (message[c] == clock) {
+							sync = p;
+							state = syncfound;
+							mstart = c;
 #ifdef DEBUGDECODE
-						//debug
-						DBG_PRINTLN();
-						DBG_PRINT("PD sync: ");
-						DBG_PRINT(pattern[clock]); DBG_PRINT(", "); DBG_PRINT(pattern[p]);
-						DBG_PRINT(", TOL: "); DBG_PRINT(tol);
-						DBG_PRINT(", sFACT: "); DBG_PRINTLN(pattern[sync] / (float)pattern[clock]);
+							//debug
+							DBG_PRINTLN();
+							DBG_PRINT("PD sync: ");
+							DBG_PRINT(pattern[clock]); DBG_PRINT(", "); DBG_PRINT(pattern[p]);
+							DBG_PRINT(", TOL: "); DBG_PRINT(tol);
+							DBG_PRINT(", sFACT: "); DBG_PRINTLN(pattern[sync] / (float)pattern[clock]);
 #endif
-						return true;
-					};
+							return true;
+						} else {
+							// sync style pulse detected without clock
+							if (state == syncdetected && c  >= mstart+minMessageLen) {
+								sync = p;
+								return true;
+							}
+							sync = p;
+							mstart = c+1;
+							state = syncdetected;
+						};
+					}
 					c++;
 				}
+				
 			}
 		}
 	}
-	sync = -1; // Workaround for sync detection bug.
+	if (state != syncfound)
+		sync = -1; // Workaround for sync detection bug.
 	return false;
 }
 
